@@ -30,6 +30,12 @@ def get_base_url(current_request):
     return base_url
 
 
+# landing page
+@app.route('/')
+def index():
+    return {'hello': 'world'}
+
+
 # shorten then url
 @app.route("/shorten", methods=['POST'])
 def shorten():
