@@ -1,4 +1,5 @@
 tinify-env/
 tinify-backend/.chalice/
+tinify-backend/__pycache__/
 tinify-backend/.gitignore
 .vscode/
