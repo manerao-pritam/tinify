@@ -1,0 +1,4 @@
+tinify-env/
+tinify-backend/.chalice/
+tinify-backend/.gitignore
+.vscode/
