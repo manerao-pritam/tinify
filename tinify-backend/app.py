@@ -1,8 +1,8 @@
 import logging
+import os
 from hashlib import sha512
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from chalice import BadRequestError, Chalice, Response
 
 # logger details
@@ -13,7 +13,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # table name, can also be refered from environment variables
-table = dynamodb.Table('TinifyAppResources-TinifyTable-8D0O6AX7GX5F')
+table = dynamodb.Table(os.environ.get('TABLE_NAME'))
 
 # App
 app = Chalice(app_name="tinify-backend")
