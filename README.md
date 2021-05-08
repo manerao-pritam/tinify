@@ -108,7 +108,7 @@ This app creates a URL shortener with AWS Serverless services. All business logi
 * Add the s3 bucket url location to /tinify-fronend/package.json
   ```json
     ...
-  "scripts": {
+    "scripts": {
       "start": "react-scripts start",
       "build": "react-scripts build",
       "test": "react-scripts test",
