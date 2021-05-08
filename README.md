@@ -32,24 +32,23 @@ This app creates a URL shortener with AWS Serverless services. All business logi
   $ cd tinify-backend
   ```
 * Create `.chalice/config.json`
-
-```json
-{
-  "version": "2.0",
-  "app_name": "tinify-backend",
-  "api_gateway_endpoint_type": "REGIONAL",
-  "iam_policy_file": "tinify-backend-dev.json",
-  "environment_variables": {
-    "TABLE_NAME": "table-name-here"
-  },
-  "stages": {
-    "dev": {
-      "api_gateway_stage": "api",
-      "autogen_policy": false
+  ```json
+  {
+    "version": "2.0",
+    "app_name": "tinify-backend",
+    "api_gateway_endpoint_type": "REGIONAL",
+    "iam_policy_file": "tinify-backend-dev.json",
+    "environment_variables": {
+      "TABLE_NAME": "table-name-here"
+    },
+    "stages": {
+      "dev": {
+        "api_gateway_stage": "api",
+        "autogen_policy": false
+      }
     }
   }
-}
-```
+  ```
 
 * Environment Variables on your local machine
   ```bash
