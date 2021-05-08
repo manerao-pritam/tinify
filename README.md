@@ -99,7 +99,7 @@ This app creates a URL shortener with AWS Serverless services. All business logi
   ```
 * Run the app
   ```matlab
-  npm start
+  yarn start
   ```
 * Note: you will need to provide the webserver url in /App.js file
 
