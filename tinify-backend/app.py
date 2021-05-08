@@ -3,6 +3,7 @@ import os
 from hashlib import sha512
 
 import boto3
+import validators
 from chalice import BadRequestError, Chalice, Response
 
 # logger details
@@ -41,7 +42,19 @@ def shorten():
     try:
         # get the url from requet body and encode it
         url = request_body['url']
+
+        # if the protocol is not added in the url, add http to avoid any issues
+        if not url[:5] in ('https', 'http'):
+            url = 'http://' + url
+
         logger.info(f'Received url: {url}')
+
+        '''
+        Valid url: True
+        Invalid url: ValidationFailure(func=url, args={'value': 'gist.github.com/dperini/729294', 'public': False})
+        '''
+        if validators.url(url) is not True:
+            raise BadRequestError("Oops! The url is invalid!")
 
         # generate hash, and get first 6 chars, these will be enough to handle enough records
         urlHash = sha512(url.encode('utf-8')).hexdigest()[:6]

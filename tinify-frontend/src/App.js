@@ -1,6 +1,7 @@
 import './App.css'
 import React, { useState } from "react"
 import axios from 'axios'
+import validator from 'validator'
 
 function App() {
 
@@ -9,8 +10,8 @@ function App() {
 
   const handleRequest = (action) => {
 
-    if (!url) {
-      alert('Please enter the url!')
+    if (!url || !validator.isURL(url)) {
+      alert('Please enter a valid url!')
       return
     }
 
@@ -20,7 +21,7 @@ function App() {
       .then(res => {
         setDisplayUrl(res.data)
       })
-      .catch(err => alert('Please enter correct url!'))
+      .catch(err => alert(`Please enter a ${action === 'expand' ? 'tinified' : 'valid'} url!`))
   }
 
   return (

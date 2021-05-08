@@ -28,10 +28,12 @@ This app creates a URL shortener with AWS Serverless services. All business logi
 
 * Create DynamoDB table from the template in /serverless directory using [cloudformation deploy](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/deploy/index.html)
 * cd to /tinify-backend
+
   ```
   $ cd tinify-backend
   ```
 * Create `.chalice/config.json`
+
   ```json
   {
     "version": "2.0",
@@ -49,12 +51,13 @@ This app creates a URL shortener with AWS Serverless services. All business logi
     }
   }
   ```
-
 * Environment Variables on your local machine
+
   ```bash
   export APP_TABLE_NAME=xxxxxxxxxxxxxxxxxxxx
   ```
 * Tinify-backend-dev.json IAM policy
+
   ```json
   {
       "Version": "2012-10-17",
@@ -78,10 +81,12 @@ This app creates a URL shortener with AWS Serverless services. All business logi
   }
   ```
 * Deploy backend
+
   ```bash
   $ chalice deploy
   ```
 * Or run locally
+
   ```
   $ chalice local
   ```
@@ -94,7 +99,7 @@ This app creates a URL shortener with AWS Serverless services. All business logi
   ```
 * Install packages
   ```
-  yarn install
+  yarn add
   ```
 * Run the app
   ```matlab
