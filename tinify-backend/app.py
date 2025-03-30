@@ -1,138 +1,126 @@
+import datetime
 import logging
-import os
-from hashlib import sha512
+import time
+from datetime import timedelta, datetime
 
-import boto3
-import validators
-from chalice import BadRequestError, Chalice, Response
+import redis.asyncio as redis
+from fastapi import FastAPI, HTTPException
+from starlette.responses import RedirectResponse
+from starlette.status import HTTP_404_NOT_FOUND, HTTP_410_GONE
+import asyncio
 
-# logger details
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+from config import SHORT_URL_LENGTH, DOMAIN_NAME, EXPIRE_IN_DAYS, REDIS_URI
+from database import client, SHORT_TO_LONG_COLL, URLS_STATS_COLL
+from models import URLToShorten
+from utils.datetime_util import datetime_to_str
+from utils.hash_util import get_hash, base62_encoding
 
-# Get the service resource.
-dynamodb = boto3.resource('dynamodb')
+# Set up logging configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# table name, can also be refered from environment variables
-table = dynamodb.Table(os.environ.get('TABLE_NAME'))
+app = FastAPI()
 
-# App
-app = Chalice(app_name="tinify-backend")
-app.debug = False
+# Initialize Redis
+redis_client = redis.from_url(REDIS_URI, decode_responses=True)
 
+# Helper function to serialize MongoDB documents
+def serialize_document(doc):
+    """Convert MongoDB document to a JSON-serializable format."""
+    doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
+    if "expiry" in doc:
+        doc["expiry"] = datetime_to_str(doc["expiry"])
+    return doc
 
-# util to get base url
-def get_base_url(current_request):
-    headers = current_request.headers
-    base_url = '%s://%s' % (headers.get('x-forwarded-proto',
-                            'http'), headers['host'])
-    if 'stage' in current_request.context:
-        base_url = '%s/%s' % (base_url, current_request.context.get('stage'))
+@app.get('/')
+async def get_all_urls():
+    """Retrieve all shortened URLs."""
+    urls = await SHORT_TO_LONG_COLL.find().to_list(None)
+    return [serialize_document(row) for row in urls]
 
-    # remove stage name as we are using custom domain name
-    return base_url.replace('/api', '')
+@app.post('/shorten')
+async def shorten(data: URLToShorten):
+    """Shorten a Long URL to a short URL."""
+    url = str(data.url)
 
+    # Generate hash and get first 8 characters
+    url_hash = get_hash(url)
+    shortened_id = base62_encoding(url_hash)[:SHORT_URL_LENGTH]
 
-# shorten then url
-@app.route("/shorten", methods=['POST'], cors=True)
-def shorten():
-    request_body = app.current_request.json_body
-    logger.info(f'Request body: {request_body}')
+    # Check for existing short_id
+    existing_doc = await SHORT_TO_LONG_COLL.find_one({"short_id": shortened_id})
+    if existing_doc:
+        if existing_doc['long_url'] == url:
+            return {"message": "Success", "url": url, "short_url": f"{DOMAIN_NAME}/{shortened_id}"}
+        url_hash = get_hash(url + str(time.time()))
+        shortened_id = base62_encoding(url_hash)[:SHORT_URL_LENGTH]
 
-    try:
-        # get the url from requet body and encode it
-        url = request_body['url']
+    # Set expiry date
+    expiry_date = datetime.utcnow() + timedelta(days=EXPIRE_IN_DAYS)
 
-        # if the protocol is not added in the url, add http to avoid any issues
-        if not url[:5] in ('https', 'http'):
-            url = 'http://' + url
+    # Insert into database
+    row = {"short_id": shortened_id, "long_url": url, "expiry": expiry_date}
+    await SHORT_TO_LONG_COLL.insert_one(row)
 
-        logger.info(f'Received url: {url}')
+    logger.info(f"URL shortened: {url} -> {DOMAIN_NAME}/{shortened_id}")
 
-        '''
-        Valid url: True
-        Invalid url: ValidationFailure(func=url, args={'value': 'gist.github.com/dperini/729294', 'public': False})
-        '''
-        if validators.url(url) is not True:
-            raise BadRequestError("Oops! The url is invalid!")
+    return {"message": "Success", "url": url, "short_url": f"{DOMAIN_NAME}/{shortened_id}"}
 
-        # generate hash, and get first 6 chars, these will be enough to handle enough records
-        urlHash = sha512(url.encode('utf-8')).hexdigest()[:6]
-        logger.info(f'Hashed url: {urlHash}')
+@app.get('/expand/{short_url}')
+async def expand(short_url: str):
+    """Expand a short URL to its original URL."""
+    fetched = await SHORT_TO_LONG_COLL.find_one({"short_id": short_url})
+    if not fetched:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Shortened URL not found")
 
-        # put the record to db
-        table.put_item(
-            Item={
-                'urlHash': urlHash,
-                'url': url
-            }
-        )
+    if 'expiry' in fetched and isinstance(fetched['expiry'], datetime):
+        if fetched['expiry'] < datetime.utcnow():
+            logger.warning(f"Shortened URL expired: {short_url}")
+            raise HTTPException(status_code=HTTP_410_GONE, detail="Shortened URL has expired")
 
-        return_url = f'{get_base_url(app.current_request)}/{urlHash}'
-        logger.info(f'Return url: {return_url}')
+    logger.info(f"Expanding URL: {short_url} -> {fetched['long_url']}")
+    return RedirectResponse(url=fetched["long_url"])
 
-        return Response(
-            body=return_url,
-            status_code=200,
-            headers={'Content-Type': 'application/json'}
-        )
+@app.get('/stats/{short_url}')
+async def get_url_stats(short_url: str):
+    """Fetch the short URL stats"""
+    stats = await URLS_STATS_COLL.find_one({"short_id": short_url})
+    if not stats:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Shortened URL not found")
+    return serialize_document(stats)
 
-    except:
-        raise BadRequestError("Oops! The url is invalid!")
+@app.get('/redirect/{short_url}')
+async def redirect(short_url: str):
+    """Redirect user and track stats"""
+    fetched = await SHORT_TO_LONG_COLL.find_one({"short_id": short_url})
+    if not fetched:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Shortened URL not found")
 
+    await redis_client.incr(f"short_url:{short_url}")
+    return RedirectResponse(url=fetched["long_url"])
 
-# route to return long url
-@app.route('/expand', methods=['POST'], cors=True)
-def expand():
-    request_body = app.current_request.json_body
-    logger.info(f'Request body: {request_body}')
+async def sync_redis_to_mongo():
+    """Efficiently sync Redis counters to MongoDB periodically."""
+    while True:
+        try:
+            keys = await redis_client.keys("short_url:*")
+            if keys:
+                counts = await redis_client.mget(keys)
+                updates = [
+                    URLS_STATS_COLL.update_one({"short_id": key.split(":")[1]}, {"$inc": {"access_count": int(count)}}, upsert=True)
+                    for key, count in zip(keys, counts) if count is not None
+                ]
+                await asyncio.gather(*updates)
+                await redis_client.delete(*keys)
+        except Exception as e:
+            logger.error(f"Error syncing Redis to MongoDB: {e}")
+        await asyncio.sleep(60)
 
-    try:
-        # get the url hash from requet body
-        urlHash = request_body['url'][-6:]
-        logger.info(f'Received url: {urlHash}')
+@app.on_event("startup")
+async def start_sync():
+    asyncio.create_task(sync_redis_to_mongo())
 
-        response = table.get_item(
-            Key={
-                'urlHash': urlHash
-            }
-        )
-        logger.info(f'DB query result: {response}')
-
-        # get url from urlHash
-        url = response['Item']['url']
-        logger.info(f'Received url: {url}')
-
-        return Response(
-            body=url,
-            status_code=200,
-            headers={'Content-Type': 'application/json'}
-        )
-
-    except:
-        raise BadRequestError("Oops! The url is invalid!")
-
-
-# Route to get the tiny url and then to redirect to the actual url
-@app.route("/{urlHash}", cors=True)
-def redirect(urlHash):
-    response = table.get_item(
-        Key={
-            'urlHash': urlHash
-        }
-    )
-    logger.info(f'DB query result: {response}')
-
-    try:
-        # get url from urlHash
-        url = response['Item']['url']
-        logger.info(f'Received url: {url}')
-
-        return Response(
-            status_code=301,
-            body='',
-            headers={'Location': url}
-        )
-
-    except IndexError:
-        raise BadRequestError("Oops! The url is invalid!")
+@app.on_event("shutdown")
+async def shutdown():
+    await redis_client.close()
+    client.close()
